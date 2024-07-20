@@ -5,12 +5,12 @@
 PATH=~/bin:$PATH
 set -e
 
-ARCH_NAME=example.zip
-ARCH_OSX=mac.pkg.zip
-ARCH_LIN=lin.pkg.zip
-ARCH_WIN=win.pkg.zip
-ARCH_LINARM=lin.aarch64.pkg.zip
-ARCH_LINE2K=lin.e2kv4.pkg.zip
+ARCH_NAME=clip1c.zip
+ARCH_OSX=clip1c.mac.pkg.zip
+ARCH_LIN=clip1c.lin.pkg.zip
+ARCH_WIN=clip1c.win.zip
+ARCH_LINARM=clip1c.lin.aarch64.pkg.zip
+ARCH_LINE2K=clip1c.lin.e2kv4.pkg.zip
 
 cmake -E remove_directory ./bin
 cmake -E remove_directory ./pkg

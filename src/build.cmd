@@ -6,12 +6,12 @@ SET VS_YEAR=2017
 SET VS_TOOLSET=v141_xp
 SET BUILD_CONFIG=Release
 
-SET ARCH_NAME=example.zip
-SET ARCH_OSX=mac.pkg.zip
-SET ARCH_LIN=lin.pkg.zip
-SET ARCH_LIN_ARM=lin.aarch64.pkg.zip
-SET ARCH_LIN_E2K=lin.e2kv4.pkg.zip
-SET ARCH_WIN=win.pkg.zip
+SET ARCH_NAME=clip1c.zip
+SET ARCH_OSX=clip1c.mac.pkg.zip
+SET ARCH_LIN=clip1c.lin.pkgzip
+SET ARCH_LIN_ARM=clip1c.lin.aarch64.pkg.zip
+SET ARCH_LIN_E2K=clip1c.lin.e2kv4.pkg.zip
+SET ARCH_WIN=clip1c.zip
 
 cmake -E remove_directory ./bin
 cmake -E remove_directory ./debug_info

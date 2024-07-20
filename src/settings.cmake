@@ -1,11 +1,11 @@
 
 #==============================================================================#
 # identification you AddIn
-SET(MYCOMPANY "MyCompany" CACHE STRING "You company name")
+SET(MYCOMPANY "MyCompany" CACHE STRING "Softonit LLC")
 SET(ADN_NAME "AddInExample" CACHE STRING "You addin name")
 #==============================================================================#
 #seting projects names
-SET(Addn_Native "AddInNative" CACHE STRING "Name for NativeAPI project" )
+SET(Addn_Native "AddInNative" CACHE STRING "Clipboard 1C" )
 SET(Addn_Chrome "AddInChr" CACHE STRING "Name for Chrome adapter project" )
 SET(Addn_IE "AddInIE" CACHE STRING "Name for IE adapter project" )
 SET(Addn_ChromeSetup "AddInChromeSetup" CACHE STRING "Name for Chrome Setup project" )

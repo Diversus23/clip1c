@@ -4,8 +4,6 @@
 #include "ComponentBase.h"
 #include "AddInDefBase.h"
 #include "IMemoryManager.h"
-#include "localization.h"
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // class CAddInNative
@@ -14,23 +12,12 @@ class CAddInNative : public IComponentBase
 public:
     enum Props
     {
-        ePropIsEnabled = 0,
-        ePropIsTimerPresent,
-        ePropLocale,
-        ePropLast      // Always last
+        eLastProp      // Always last
     };
 
     enum Methods
     {
-        eMethEnable = 0,
-        eMethDisable,
-        eMethShowInStatusLine,
-        eMethStartTimer,
-        eMethStopTimer,
-        eMethLoadPicture,
-        eMethShowMsgBox,
-		eLoopback,
-        eMethLast      // Always last
+        eLastMethod      // Always last
     };
 
     CAddInNative(void);
@@ -67,21 +54,6 @@ public:
     virtual void ADDIN_API SetUserInterfaceLanguageCode(const WCHAR_T* lang) override;
     
 private:
-    long findName(const wchar_t* names[], const wchar_t* name, const uint32_t size) const;
-    void addError(uint32_t wcode, const wchar_t* source, 
-                    const wchar_t* descriptor, long code);
-    void addError(uint32_t wcode, const char16_t* source, 
-                    const char16_t* descriptor, long code);
     // Attributes
-    IAddInDefBase      *m_iConnect;
-    IMemoryManager     *m_iMemory;
-
-    bool                m_boolEnabled;
-    uint32_t            m_uiTimer;
-    std::u16string      m_userLang;
-#if !defined( __linux__ ) && !defined(__APPLE__)
-    HANDLE              m_hTimer;
-    HANDLE              m_hTimerQueue;
-#endif //__linux__
 };
 #endif //__ADDINNATIVE_H__

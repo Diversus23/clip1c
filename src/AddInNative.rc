@@ -1,6 +1,6 @@
 // Microsoft Visual C++ generated resource script.
 //
-#include "resource.h"
+//#include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -27,8 +27,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION @Addn_VERSION_FULL_C@
- PRODUCTVERSION @Addn_VERSION_FULL_C@
+ FILEVERSION 1,4,2,01
+ PRODUCTVERSION 1,4,2,01
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -43,14 +43,14 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "@MYCOMPANY@"
-            VALUE "FileDescription", "@Addn_Chrome@"
-            VALUE "FileVersion", "@Addn_VERSION_FULL_C@"
-            VALUE "InternalName", "@Addn_Chrome@"
-            VALUE "LegalCopyright", "Copyright © @MYCOMPANY@ @YEAR@ All rights reserved."
-            VALUE "OriginalFilename", "@Addn_Chrome@.exe"
-            VALUE "ProductName", "@Addn_Native@ extension for Chrome and Firefox"
-            VALUE "ProductVersion", "@Addn_VERSION_FULL_C@"
+            VALUE "CompanyName", "MyCompany"
+            VALUE "FileDescription", "AddInNative"
+            VALUE "FileVersion", "1,4,2,01"
+            VALUE "InternalName", "AddInNative"
+            VALUE "LegalCopyright", "Copyright © MyCompany 2022 All rights reserved."
+            VALUE "OriginalFilename", "AddInNative.dll"
+            VALUE "ProductName", "MyCompany External Component Sample"
+            VALUE "ProductVersion", "1,4,2,01"
         END
     END
     BLOCK "VarFileInfo"

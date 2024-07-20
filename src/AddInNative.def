@@ -1,4 +1,4 @@
-LIBRARY    "@Addn_Native@@MySuffix1@@MySuffix2@_@Addn_VERSION@.DLL"
+LIBRARY    "AddInNative.dll"
 
 EXPORTS
 GetClassObject
