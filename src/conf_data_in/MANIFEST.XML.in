@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<bundle xmlns="http://v8.1c.ru/8.2/addin/bundle">
+  <component os="Windows" path="@Addn_Native@Win32_@Addn_VERSION@.dll" type="native" arch="i386"/>
+  <component os="Windows" path="@Addn_Native@Win64_@Addn_VERSION@.dll" type="native" arch="x86_64"/>
+  <component os="Linux" path="lib@Addn_Native@Lin32_@Addn_VERSION@.so" type="native" arch="i386"/>
+  <component os="Linux" path="lib@Addn_Native@Lin64_@Addn_VERSION@.so" type="native" arch="x86_64"/>
+  <component os="Linux" path="lib@Addn_Native@LinARM64_@Addn_VERSION@.so" type="native" arch="ARM64"/>
+  <component os="Linux" path="lib@Addn_Native@LinE2K-8C_@Addn_VERSION@.so" type="native" arch="E2K"/>
+  <component os="MacOS" path="lib@Addn_Native@Mac64_@Addn_VERSION@.dylib" type="native" arch="x86_64"/>
+</bundle>

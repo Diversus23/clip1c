@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+$XorTrDa
+src/bin/*.*
+src/bin/Release/*.*
+src/debug_info/Release/*.*
+src/pkg/*.*
+*.bz2
+*.zip
