@@ -12,12 +12,21 @@ class CAddInNative : public IComponentBase
 public:
     enum Props
     {
-        eLastProp      // Always last
+		ePropText = 0,
+		ePropImage,
+		ePropFiles,
+		ePropFormat,
+		ePropVersion,
+		ePropLast      // Always last
     };
 
     enum Methods
     {
-        eLastMethod      // Always last
+		eMethSetText = 0,
+		eMethSetFiles,
+		eMethSetImage,
+		eMethEmpty,
+        eMethLast      // Always last
     };
 
     CAddInNative(void);
@@ -54,6 +63,13 @@ public:
     virtual void ADDIN_API SetUserInterfaceLanguageCode(const WCHAR_T* lang) override;
     
 private:
+	long findName(const wchar_t* names[], const wchar_t* name, const uint32_t size) const;
+	void addError(uint32_t wcode, const wchar_t* source,
+		const wchar_t* descriptor, long code);
+	void addError(uint32_t wcode, const char16_t* source,
+		const char16_t* descriptor, long code);
     // Attributes
+	IAddInDefBase      *m_iConnect;
+	IMemoryManager     *m_iMemory;
 };
 #endif //__ADDINNATIVE_H__
