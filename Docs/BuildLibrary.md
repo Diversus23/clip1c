@@ -71,6 +71,48 @@ cmake --build .
 Замените в командах `RelWithDebInfo` на `Debug` либо передайте
 `-DCMAKE_BUILD_TYPE=Debug` напрямую в CMake.
 
+### Выпуск релиза
+
+Релиз выпускается через git-тег, формат `vX.Y.Z`. Workflow CI
+автоматически собирает все платформы и создаёт GitHub Release с
+прикреплённым `AddIn.zip`.
+
+Шаги:
+
+```bash
+# 1. Обновить версию в version.h
+#    например VERSION_FULL 1.0.1.0 и компоненты VERSION_MAJOR/MINOR/REVISION/BUILD
+
+# 2. Закоммитить bump версии
+git add version.h
+git commit -m "chore: bump version to 1.0.1"
+
+# 3. Создать аннотированный тег
+git tag -a v1.0.1 -m "Release 1.0.1"
+
+# 4. Запушить коммит и тег
+git push origin main
+git push origin v1.0.1
+```
+
+Что произойдёт после push'а тега:
+1. Workflow `Build` запустится автоматически (триггер `tags: ['v*']`).
+2. Соберутся все 5 бинарников (Win32/Win64/Lin32/Lin64/MacOS Universal).
+3. Job `package` соберёт `AddIn.zip` с `MANIFEST.XML`.
+4. Будет создан GitHub Release с тем же именем тега, в `Release notes`
+   автоматически попадут commit-сообщения с предыдущего тега,
+   а в Assets — `AddIn.zip` и `Clip1C-<version>.zip`.
+
+**Пре-релизы:** тег вида `v1.0.1-rc1`, `v1.0.1-beta`, `v1.0.1-alpha`
+автоматически помечается как pre-release.
+
+**Откат тега, если что-то пошло не так:**
+```bash
+git tag -d v1.0.1                    # удалить локально
+git push --delete origin v1.0.1      # удалить с GitHub
+# Удалить созданный релиз через UI: github.com/<repo>/releases
+```
+
 ### Локальная упаковка AddIn.zip
 
 После того как собраны бинарники под все нужные платформы (и они лежат
