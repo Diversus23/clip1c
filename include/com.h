@@ -40,13 +40,19 @@ typedef long HRESULT;
 #define FAR    far
 
 typedef unsigned long       DWORD;
-#ifndef __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__  // iOS
+// Apple objc/objc.h определяет BOOL как signed char (или bool на ARM64) и
+// выставляет OBJC_BOOL_DEFINED — в Objective-C++ файлах это происходит
+// раньше, поэтому пропускаем собственное определение, чтобы не было
+// typedef redefinition.
+#if defined(OBJC_BOOL_DEFINED)
+// BOOL уже определён Apple ObjC runtime
+#elif !defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)  // не iOS
 typedef int                 BOOL;
 #elif defined(__LP64__)
 typedef bool                BOOL;
 #else
 typedef signed char         BOOL;
-#endif //!__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__
+#endif
 
 typedef void                VOID;
 typedef short               SHORT;

@@ -1,9 +1,12 @@
-#include "ClipboardManager.h"
-
 #ifdef __APPLE__
 
+// Apple-фреймворки импортируем ПЕРВЫМИ — они определяют BOOL как signed char
+// и выставляют OBJC_BOOL_DEFINED, что блокирует определение BOOL=int в com.h
+// (1С SDK). Иначе получаем typedef redefinition.
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
+
+#include "ClipboardManager.h"
 
 #include <vector>
 #include <string>
