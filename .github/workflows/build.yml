@@ -158,28 +158,21 @@ jobs:
           unzip -l AddIn.zip
           unzip -p AddIn.zip MANIFEST.XML
 
-      - name: Rename bundle with version
-        run: cp AddIn.zip "Clip1C-${{ steps.ver.outputs.version }}.zip"
-
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Clip1C-${{ steps.ver.outputs.version }}
-          path: |
-            AddIn.zip
-            Clip1C-${{ steps.ver.outputs.version }}.zip
+          name: AddIn-${{ steps.ver.outputs.version }}
+          path: AddIn.zip
           if-no-files-found: error
 
       # При push'е тега вида v1.2.3 автоматически создаётся GitHub Release
       # с прикреплённым AddIn.zip. Если релиз с этим тегом уже существует
-      # (например, был создан вручную через UI), action просто добавит файлы.
+      # (например, был создан вручную через UI), action просто добавит файл.
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            AddIn.zip
-            Clip1C-${{ steps.ver.outputs.version }}.zip
+          files: AddIn.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
