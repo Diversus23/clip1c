@@ -88,7 +88,7 @@ std::wstring BaseHelper::ClipboardManager::GetText()
 	std::wstring result;
 	if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
 		if (HGLOBAL hGlobal = ::GetClipboardData(CF_UNICODETEXT)) {
-			// GlobalLock может вернуть NULL — std::wstring(nullptr) это UB.
+			// GlobalLock может вернуть NULL — std::wstring(nullptr) это UB / краш.
 			if (LPWSTR p = static_cast<LPWSTR>(GlobalLock(hGlobal))) {
 				result = p;
 				GlobalUnlock(hGlobal);
@@ -132,7 +132,7 @@ bool BaseHelper::ClipboardManager::SetText(const std::wstring& text, bool bEmpty
 	if (!dst) { GlobalFree(hGlobal); return false; }
 	memcpy(dst, text.c_str(), size);
 	GlobalUnlock(hGlobal);
-	// После успешного SetClipboardData владельцем буфера становится система — GlobalFree нельзя.
+	// После успешного SetClipboardData буфером владеет система — GlobalFree нельзя.
 	if (!SetClipboardData(CF_UNICODETEXT, hGlobal)) {
 		GlobalFree(hGlobal);
 		return false;
@@ -151,7 +151,7 @@ bool BaseHelper::ClipboardManager::SetFiles(const std::string& text, bool bEmpty
 	catch (...) { return false; }
 	if (!json.is_array()) return false;
 
-	SIZE_T clpSize = sizeof(DROPFILES) + sizeof(TCHAR); // двойной \0 в конце списка
+	SIZE_T clpSize = sizeof(DROPFILES);
 	for (auto element : json) {
 		std::wstring filename = MB2WC(element);
 		clpSize += (filename.size() + 1) * sizeof(TCHAR);
@@ -171,6 +171,7 @@ bool BaseHelper::ClipboardManager::SetFiles(const std::string& text, bool bEmpty
 		dstStart = &dstStart[len];
 	}
 	GlobalUnlock(hDrop);
+	// SetClipboardData передаёт владение системе — освобождаем только при неудаче.
 	if (!SetClipboardData(CF_HDROP, hDrop)) {
 		GlobalFree(hDrop);
 		return false;
@@ -195,6 +196,8 @@ bool BaseHelper::ClipboardManager::GetImage(VH& variant)
 		}
 	}
 
+	// CF_DIBV5: явная проверка доступности формата и результатов GetClipboardData/GlobalLock —
+	// иначе ImageHelper(BITMAPINFO*=nullptr, ...) разыменует NULL внутри GDI+.
 	if (!IsClipboardFormatAvailable(CF_DIBV5)) return true;
 	HANDLE hData = ::GetClipboardData(CF_DIBV5);
 	if (!hData) return true;
@@ -228,29 +231,31 @@ bool BaseHelper::ClipboardManager::SetImage(VH& variant, bool bEmpty)
 		memcpy(buffer, vec.data(), vec.size());
 		GlobalUnlock(hGlobalPng);
 	}
+	// После успешного SetClipboardData владельцем буфера становится система — GlobalFree нельзя.
 	if (!SetClipboardData(CF_PNG, hGlobalPng)) {
 		GlobalFree(hGlobalPng);
 		return false;
 	}
-	// hGlobalPng теперь принадлежит системе — НЕ освобождаем.
 
 	HBITMAP hBitmap(image);
-	if (!hBitmap) return true; // PNG записан, без DIB тоже ОК.
+	if (!hBitmap) return true; // PNG записан, DIB — best-effort.
 
 	BITMAP bm;
 	GetObject(hBitmap, sizeof bm, &bm);
-	// GetDIBits с BI_RGB выравнивает строки по 4 байта. bm.bmWidthBytes — это stride исходной
-	// GDI-битмапы, который может отличаться от DIB-stride и привести к heap overflow.
-	const LONG dibStride = ((bm.bmWidth * bm.bmBitsPixel + 31) / 32) * 4;
 	BITMAPINFOHEADER bi = { sizeof bi, bm.bmWidth, bm.bmHeight, 1, bm.bmBitsPixel, BI_RGB };
-	std::vector<BYTE> dib((size_t)dibStride * bm.bmHeight);
+	// GetDIBits с BI_RGB всегда выравнивает строки DIB по 4 байтам, тогда как
+	// bm.bmWidthBytes у GDI-битмапы выровнен по 2. При несовпадении (любой
+	// GDI-bitmap с шириной не кратной 4 пикселям при bpp < 32) GetDIBits писал
+	// за пределы std::vector → heap overflow в процессе 1С.
+	const LONG dibStride = ((bm.bmWidth * bm.bmBitsPixel + 31) / 32) * 4;
+	std::vector<BYTE> dib(static_cast<size_t>(dibStride) * bm.bmHeight);
 	HDC hDC = GetDC(NULL);
 	GetDIBits(hDC, hBitmap, 0, bi.biHeight, dib.data(), (BITMAPINFO*)&bi, 0);
 	ReleaseDC(NULL, hDC);
 	DeleteObject(hBitmap);
 
 	HGLOBAL hGlobalDib = GlobalAlloc(GMEM_MOVEABLE, sizeof bi + dib.size());
-	if (!hGlobalDib) return true; // PNG уже на месте.
+	if (!hGlobalDib) return true;
 	BYTE* buffer = (BYTE*)GlobalLock(hGlobalDib);
 	if (!buffer) { GlobalFree(hGlobalDib); return true; }
 	memcpy(buffer, &bi, sizeof bi);
