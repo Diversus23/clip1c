@@ -1,0 +1,163 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  windows:
+    name: Windows (Win32 + x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure x64
+        run: cmake -S . -B build64W -A x64 -DTARGET_PLATFORM_32:BOOL=OFF
+
+      - name: Build x64
+        run: cmake --build build64W --config Release
+
+      - name: Configure Win32
+        run: cmake -S . -B build32W -A Win32 -DTARGET_PLATFORM_32:BOOL=ON
+
+      - name: Build Win32
+        run: cmake --build build32W --config Release
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            bin32/Release/*.dll
+            bin64/Release/*.dll
+            bin32/Release/*.pdb
+            bin64/Release/*.pdb
+          if-no-files-found: error
+
+  linux:
+    name: Linux (x86 + x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86_64 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential cmake elfutils \
+              libxcb1-dev libpng-dev libx11-dev
+
+      - name: Install i386 dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              gcc-multilib g++-multilib \
+              libxcb1-dev:i386 libpng-dev:i386 libx11-dev:i386
+
+      - name: Build x86_64
+        run: |
+          cmake -S . -B build64L \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DTARGET_PLATFORM_32:BOOL=OFF
+          cmake --build build64L -- -j$(nproc)
+
+      - name: Build i386
+        run: |
+          cmake -S . -B build32L \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DTARGET_PLATFORM_32:BOOL=ON
+          cmake --build build32L -- -j$(nproc)
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: |
+            bin32/*.so
+            bin64/*.so
+            bin32/*.so.debug
+            bin64/*.so.debug
+          if-no-files-found: error
+
+  macos:
+    name: macOS (universal x86_64 + arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (universal)
+        run: |
+          cmake -S . -B build64L \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DTARGET_PLATFORM_32:BOOL=OFF \
+              -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        run: cmake --build build64L -- -j$(sysctl -n hw.ncpu)
+
+      - name: Verify universal binary
+        run: |
+          file bin64/Clip1CMac64.dylib
+          lipo -info bin64/Clip1CMac64.dylib
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: bin64/*.dylib
+          if-no-files-found: error
+
+  package:
+    name: Package AddIn.zip
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f -printf '%p\t%s\n' | sort
+
+      - name: Read version
+        id: ver
+        run: |
+          v=$(grep -oP '#define\s+VERSION_FULL\s+\K[\d.]+' version.h)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build AddIn.zip
+        run: |
+          python3 tools/make_bundle.py \
+              --artifacts-dir artifacts \
+              --output AddIn.zip \
+              --strict
+
+      - name: Inspect bundle
+        run: |
+          ls -la AddIn.zip
+          unzip -l AddIn.zip
+          unzip -p AddIn.zip MANIFEST.XML
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AddIn-${{ steps.ver.outputs.version }}
+          path: AddIn.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AddIn.zip

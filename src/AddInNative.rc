@@ -1,102 +1,67 @@
-// Microsoft Visual C++ generated resource script.
-//
-//#include "resource.h"
+#include <windows.h>
+#include "../version.h"
+
+#define STRINGIZE2(s) #s
+#define STRINGIZE(s) STRINGIZE2(s)
+
+#define VER_FILE_VERSION            VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION, VERSION_BUILD
+#define VER_FILE_VERSION_STR        STRINGIZE(VERSION_MAJOR)        \
+                                    "." STRINGIZE(VERSION_MINOR)    \
+                                    "." STRINGIZE(VERSION_REVISION) \
+                                    "." STRINGIZE(VERSION_BUILD)    
+
+#define VER_FILE_DESCRIPTION_STR    "Clip1C - Native AddIn for 1C clipboard"
+#define VER_COPYRIGHT_STR           "Clip1C contributors"
+#define VER_FILE_EXT                ".dll"
+#define VER_FILE_STR                STRINGIZE(VER_FILENAME)
+
+/////////////////////////////////////////////////////////////////////////////
 
 #define APSTUDIO_READONLY_SYMBOLS
-/////////////////////////////////////////////////////////////////////////////
-//
-// Generated from the TEXTINCLUDE 2 resource.
-//
-#include "winres.h"
 
-/////////////////////////////////////////////////////////////////////////////
-#undef APSTUDIO_READONLY_SYMBOLS
+#define VER_PRODUCTNAME_STR         VER_FILE_STR
+#define VER_PRODUCT_VERSION         VER_FILE_VERSION
+#define VER_PRODUCT_VERSION_STR     VER_FILE_VERSION_STR
+#define VER_ORIGINAL_FILENAME_STR   VER_FILE_STR VER_FILE_EXT
+#define VER_INTERNAL_NAME_STR       VER_ORIGINAL_FILENAME_STR
 
-/////////////////////////////////////////////////////////////////////////////
-// English (U.S.) resources
+#ifdef _DEBUG
+#define VER_VER_DEBUG             VS_FF_DEBUG
+#else
+#define VER_VER_DEBUG             0
+#endif
 
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
-#ifdef _WIN32
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
-#pragma code_page(1252)
-#endif //_WIN32
+#define VER_FILEOS                  VOS_NT_WINDOWS32
+#define VER_FILEFLAGS               VER_VER_DEBUG
 
 /////////////////////////////////////////////////////////////////////////////
 //
 // Version
 //
-
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,4,2,01
- PRODUCTVERSION 1,4,2,01
- FILEFLAGSMASK 0x3fL
-#ifdef _DEBUG
- FILEFLAGS 0x1L
-#else
- FILEFLAGS 0x0L
-#endif
- FILEOS 0x40004L
- FILETYPE 0x2L
- FILESUBTYPE 0x0L
+ FILEVERSION        VER_FILE_VERSION
+ PRODUCTVERSION     VER_PRODUCT_VERSION
+ FILEFLAGSMASK      0x3fL
+ FILEFLAGS          VER_FILEFLAGS
+ FILEOS             VER_FILEOS
+ FILETYPE           VFT_DLL
+ FILESUBTYPE        0x0L
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "040904e4"
+        BLOCK "041904B0"
         BEGIN
-            VALUE "CompanyName", "MyCompany"
-            VALUE "FileDescription", "AddInNative"
-            VALUE "FileVersion", "1,4,2,01"
-            VALUE "InternalName", "AddInNative"
-            VALUE "LegalCopyright", "Copyright © MyCompany 2022 All rights reserved."
-            VALUE "OriginalFilename", "AddInNative.dll"
-            VALUE "ProductName", "MyCompany External Component Sample"
-            VALUE "ProductVersion", "1,4,2,01"
+            VALUE "FileDescription",  VER_FILE_DESCRIPTION_STR "\0"
+            VALUE "FileVersion",      VER_FILE_VERSION_STR "\0"
+            VALUE "InternalName",     VER_INTERNAL_NAME_STR "\0"
+            VALUE "LegalCopyright",   VER_COPYRIGHT_STR "\0"
+            VALUE "OriginalFilename", VER_ORIGINAL_FILENAME_STR "\0"
+            VALUE "ProductName",      VER_PRODUCTNAME_STR
+            VALUE "ProductVersion",   VER_PRODUCT_VERSION_STR "\0"
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
-        VALUE "Translation", 0x409, 1252
+        VALUE "Translation", 0x0419, 0x04B0
     END
 END
-
-
-#ifdef APSTUDIO_INVOKED
-/////////////////////////////////////////////////////////////////////////////
-//
-// TEXTINCLUDE
-//
-
-1 TEXTINCLUDE 
-BEGIN
-    "resource.h\0"
-END
-
-2 TEXTINCLUDE 
-BEGIN
-    "#include ""afxres.h""\r\n"
-    "\0"
-END
-
-3 TEXTINCLUDE 
-BEGIN
-    "\r\n"
-    "\0"
-END
-
-#endif    // APSTUDIO_INVOKED
-
-#endif    // English (U.S.) resources
-/////////////////////////////////////////////////////////////////////////////
-
-
-
-#ifndef APSTUDIO_INVOKED
-/////////////////////////////////////////////////////////////////////////////
-//
-// Generated from the TEXTINCLUDE 3 resource.
-//
-
-
-/////////////////////////////////////////////////////////////////////////////
-#endif    // not APSTUDIO_INVOKED
-

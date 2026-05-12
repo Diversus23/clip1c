@@ -1,8 +1,6 @@
-LIBRARY    "AddInNative.dll"
-
 EXPORTS
-GetClassObject
-DestroyObject
-GetClassNames
-SetPlatformCapabilities
-GetAttachType
+	GetClassObject
+	DestroyObject
+	GetClassNames
+	GetAttachType
+	SetPlatformCapabilities
