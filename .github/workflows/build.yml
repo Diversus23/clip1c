@@ -13,8 +13,10 @@ permissions:
 
 env:
   # GitHub Actions с июня 2026 переводят JS-actions на Node.js 24.
-  # Включаем заранее, чтобы избежать предупреждений (actions/checkout,
-  # actions/upload-artifact, actions/download-artifact пока v4 = Node 20).
+  # Основные actions уже подняты до версий, нативно работающих на Node 24
+  # (checkout@v6, upload-artifact@v7, download-artifact@v8). Флаг оставлен
+  # как страховка для сторонних actions, ещё использующих Node 20
+  # (например, softprops/action-gh-release@v2).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -22,7 +24,7 @@ jobs:
     name: Windows (Win32 + x64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure x64
         run: cmake -S . -B build64W -A x64 -DTARGET_PLATFORM_32:BOOL=OFF
@@ -37,7 +39,7 @@ jobs:
         run: cmake --build build32W --config Release
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-binaries
           path: |
@@ -51,7 +53,7 @@ jobs:
     name: Linux (x86 + x64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install x86_64 dependencies
         run: |
@@ -83,7 +85,7 @@ jobs:
           cmake --build build32L -- -j$(nproc)
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-binaries
           path: |
@@ -97,7 +99,7 @@ jobs:
     name: macOS (universal x86_64 + arm64)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure (universal)
         run: |
@@ -116,7 +118,7 @@ jobs:
           lipo -info bin64/Clip1CMac64.dylib
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-binaries
           path: bin64/*.dylib
@@ -127,10 +129,10 @@ jobs:
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -160,7 +162,7 @@ jobs:
         run: cp AddIn.zip "Clip1C-${{ steps.ver.outputs.version }}.zip"
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Clip1C-${{ steps.ver.outputs.version }}
           path: |
