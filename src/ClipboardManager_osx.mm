@@ -5,11 +5,24 @@
 // (1С SDK). Иначе получаем typedef redefinition.
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
+#include <dispatch/dispatch.h>
 
 #include "ClipboardManager.h"
 
 #include <vector>
 #include <string>
+
+// AppKit (NSBitmapImageRep, NSImage) thread-unsafe вне main thread. 1С зовёт компоненту
+// из своего фонового потока, поэтому каждый вход в AppKit оборачиваем в синхронный диспатч
+// на main queue. Если уже на main — вызываем напрямую, чтобы не словить deadlock.
+static void runOnMainSync(dispatch_block_t block)
+{
+	if ([NSThread isMainThread]) {
+		block();
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), block);
+	}
+}
 
 BaseHelper::ClipboardManager::ClipboardManager()
 {
@@ -63,13 +76,17 @@ std::wstring BaseHelper::ClipboardManager::GetFiles()
 	JSON json;
 	@autoreleasepool {
 		NSPasteboard* pb = [NSPasteboard generalPasteboard];
+		if (!pb) return MB2WC(json.dump());
 		NSArray* classes = @[[NSURL class]];
 		NSDictionary* options = @{ NSPasteboardURLReadingFileURLsOnlyKey: @YES };
 		NSArray<NSURL*>* urls = [pb readObjectsForClasses:classes options:options];
 		for (NSURL* u in urls) {
-			if (u.isFileURL) {
-				json.push_back(std::string([[u path] UTF8String]));
-			}
+			if (!u.isFileURL) continue;
+			NSString* path = [u path];
+			if (!path) continue;
+			const char* utf8 = [path UTF8String];
+			if (!utf8) continue;
+			json.push_back(std::string(utf8));
 		}
 	}
 	std::string s = json.dump();
@@ -100,41 +117,53 @@ bool BaseHelper::ClipboardManager::SetFiles(const std::string& text, bool bEmpty
 
 bool BaseHelper::ClipboardManager::GetImage(VH& data)
 {
-	@autoreleasepool {
-		NSPasteboard* pb = [NSPasteboard generalPasteboard];
-		NSData* png = [pb dataForType:NSPasteboardTypePNG];
-		if (!png) {
-			NSData* tiff = [pb dataForType:NSPasteboardTypeTIFF];
-			if (!tiff) return true;
-			NSBitmapImageRep* rep = [NSBitmapImageRep imageRepWithData:tiff];
-			if (!rep) return true;
-			png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-			if (!png) return true;
+	__block bool result = true;
+	// AppKit (NSBitmapImageRep, TIFF→PNG конвертация) требует main thread.
+	runOnMainSync(^{
+		@autoreleasepool {
+			NSPasteboard* pb = [NSPasteboard generalPasteboard];
+			if (!pb) { result = false; return; }
+			NSData* png = [pb dataForType:NSPasteboardTypePNG];
+			if (!png) {
+				NSData* tiff = [pb dataForType:NSPasteboardTypeTIFF];
+				if (!tiff) return; // буфер пуст — это не ошибка, data остаётся пустым.
+				NSBitmapImageRep* rep = [NSBitmapImageRep imageRepWithData:tiff];
+				if (!rep) { result = false; return; }
+				png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+				if (!png) { result = false; return; }
+			}
+			NSUInteger len = [png length];
+			if (len == 0) return;
+			data.AllocMemory((unsigned long)len);
+			memcpy(data.data(), [png bytes], len);
 		}
-		NSUInteger len = [png length];
-		if (len == 0) return true;
-		data.AllocMemory((unsigned long)len);
-		memcpy(data.data(), [png bytes], len);
-		return true;
-	}
+	});
+	return result;
 }
 
 bool BaseHelper::ClipboardManager::SetImage(VH& data, bool bEmpty)
 {
-	@autoreleasepool {
-		NSData* png = [NSData dataWithBytes:data.data() length:data.size()];
-		if (!png) return false;
-		NSPasteboard* pb = [NSPasteboard generalPasteboard];
-		if (bEmpty) [pb clearContents];
-		// Записываем оба формата: PNG (как есть) и TIFF (для совместимости со стандартными приложениями macOS).
-		BOOL ok = [pb setData:png forType:NSPasteboardTypePNG];
-		NSBitmapImageRep* rep = [NSBitmapImageRep imageRepWithData:png];
-		if (rep) {
-			NSData* tiff = [rep TIFFRepresentation];
-			if (tiff) [pb setData:tiff forType:NSPasteboardTypeTIFF];
+	__block bool result = false;
+	runOnMainSync(^{
+		@autoreleasepool {
+			NSData* png = [NSData dataWithBytes:data.data() length:data.size()];
+			if (!png) return;
+			NSPasteboard* pb = [NSPasteboard generalPasteboard];
+			if (!pb) return;
+			if (bEmpty) [pb clearContents];
+			// PNG — основной формат. TIFF дописываем для совместимости со стандартными приложениями macOS,
+			// но только если PNG-запись успешна — иначе пастборд может быть закрыт другим приложением.
+			BOOL pngOk = [pb setData:png forType:NSPasteboardTypePNG];
+			if (!pngOk) return;
+			NSBitmapImageRep* rep = [NSBitmapImageRep imageRepWithData:png];
+			if (rep) {
+				NSData* tiff = [rep TIFFRepresentation];
+				if (tiff) [pb setData:tiff forType:NSPasteboardTypeTIFF];
+			}
+			result = true;
 		}
-		return ok == YES;
-	}
+	});
+	return result;
 }
 
 bool BaseHelper::ClipboardManager::Empty()

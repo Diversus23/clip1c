@@ -22,6 +22,7 @@
 #include <codecvt>
 #include <cwctype>
 #include <sstream>
+#include <vector>
 
 #include "AddInNative.h"
 
@@ -48,6 +49,12 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD  ul_reason_for_call, LPVOID lpReserv
 
 AppCapabilities g_capabilities = eAppCapabilitiesInvalid;
 
+// Явный extern "C" на определениях: 1С runtime ищет символы через dlsym под точными именами
+// (GetClassObject и т.д.). Без C linkage GCC/Clang манглируют имена, и version.script с
+// точными именами скрывает их в local: *. Объявления в ComponentBase.h уже extern "C", но
+// дублирование на определениях защищает от регрессии при реорганизации include'ов.
+extern "C" {
+
 AppCapabilities SetPlatformCapabilities(const AppCapabilities capabilities)
 {
 	g_capabilities = capabilities;
@@ -56,7 +63,11 @@ AppCapabilities SetPlatformCapabilities(const AppCapabilities capabilities)
 
 AttachType GetAttachType()
 {
-	return eCanAttachNotIsolated;
+	// eCanAttachAny: компонента работает и изолированно, и в адресном пространстве 1С.
+	// Платформы 8.3.21+ для толстого клиента Windows x64 по умолчанию подключают
+	// Native-компоненты изолированно — с прежним eCanAttachNotIsolated 1С отказывалась
+	// загружать и писала "не предназначена для Толстый клиент (Windows x86-64)".
+	return eCanAttachAny;
 }
 
 const WCHAR_T* GetClassNames()
@@ -80,15 +91,20 @@ long DestroyObject(IComponentBase** pInterface)
 	return 0;
 }
 
+} // extern "C"
+
+// std::wstring_convert хранит внутренние буферы ошибок и не потокобезопасен.
+// thread_local решает оба требования: каждый поток получает свой экземпляр,
+// и горячий путь маршалинга tVariant не платит за construct/destruct на каждый вызов.
 std::string WC2MB(const std::wstring& wstr)
 {
-	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
 	return converter.to_bytes(wstr);
 }
 
 std::wstring MB2WC(const std::string& str)
 {
-	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
 	return converter.from_bytes(str);
 }
 
@@ -122,10 +138,13 @@ long AddInNative::GetInfo()
 
 void AddInNative::Done()
 {
+	std::lock_guard<std::mutex> lock(name_cache_mutex);
+	name_cache.clear();
 }
 
 bool AddInNative::RegisterExtensionAs(WCHAR_T** wsLanguageExt)
 {
+	// Имя расширения 1С освобождает через FreeMemory — поэтому здесь AllocMemory оправдан.
 	return *wsLanguageExt = W(name.c_str());
 }
 
@@ -160,7 +179,7 @@ const WCHAR_T* AddInNative::GetPropName(long lPropNum, long lPropAlias)
 		if (it == properties.end()) return nullptr;
 		auto nm = std::next(it->names.begin(), lPropAlias);
 		if (nm == it->names.end()) return nullptr;
-		return W(nm->c_str());
+		return Wcached(*nm);
 	}
 	catch (...) {
 		return nullptr;
@@ -256,7 +275,7 @@ const WCHAR_T* AddInNative::GetMethodName(const long lMethodNum, const long lMet
 		if (it == methods.end()) return nullptr;
 		auto nm = std::next(it->names.begin(), lMethodAlias);
 		if (nm == it->names.end()) return nullptr;
-		return W(nm->c_str());
+		return Wcached(*nm);
 	}
 	catch (...) {
 		return nullptr;
@@ -378,6 +397,7 @@ bool AddInNative::CallAsProc(const long lMethodNum, tVariant* paParams, const lo
 {
 	auto it = std::next(methods.begin(), lMethodNum);
 	if (it == methods.end()) return false;
+	if (lSizeArray > 0 && paParams == nullptr) return false;
 	try {
 		result << VA(nullptr);
 		return CallMethod(&it->handler, paParams, &(*it), lSizeArray);
@@ -399,6 +419,7 @@ bool AddInNative::CallAsFunc(const long lMethodNum, tVariant* pvarRetValue, tVar
 {
 	auto it = std::next(methods.begin(), lMethodNum);
 	if (it == methods.end()) return false;
+	if (lSizeArray > 0 && paParams == nullptr) return false;
 	try {
 		result << VA(pvarRetValue);
 		bool ok = CallMethod(&it->handler, paParams, &(*it), lSizeArray);
@@ -476,10 +497,10 @@ void ADDIN_API AddInNative::FreeMemory(void** pMemory) const
 std::string WCHAR2MB(std::basic_string_view<WCHAR_T> src)
 {
 #ifdef _WINDOWS
-	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
 	return cvt_utf8_utf16.to_bytes(src.data(), src.data() + src.size());
 #else
-	static std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
 	return cvt_utf8_utf16.to_bytes(reinterpret_cast<const char16_t*>(src.data()),
 		reinterpret_cast<const char16_t*>(src.data() + src.size()));
 #endif//_WINDOWS
@@ -489,7 +510,7 @@ std::wstring WCHAR2WC(std::basic_string_view<WCHAR_T> src) {
 #ifdef _WINDOWS
 	return std::wstring(src);
 #else
-	static std::wstring_convert<std::codecvt_utf16<wchar_t, 0x10ffff, std::little_endian>> conv;
+	thread_local std::wstring_convert<std::codecvt_utf16<wchar_t, 0x10ffff, std::little_endian>> conv;
 	return conv.from_bytes(reinterpret_cast<const char*>(src.data()),
 		reinterpret_cast<const char*>(src.data() + src.size()));
 #endif//_WINDOWS
@@ -497,28 +518,54 @@ std::wstring WCHAR2WC(std::basic_string_view<WCHAR_T> src) {
 
 std::u16string MB2WCHAR(std::string_view src) {
 #ifdef _WINDOWS
-	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
 	std::wstring tmp = cvt_utf8_utf16.from_bytes(src.data(), src.data() + src.size());
 	return std::u16string(reinterpret_cast<const char16_t*>(tmp.data()), tmp.size());
 #else
-	static std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
+	thread_local std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
 	return cvt_utf8_utf16.from_bytes(src.data(), src.data() + src.size());
 #endif//_WINDOWS
 }
 
-std::locale locale_ru = std::locale("ru_RU.UTF-8");
+// Безопасная инициализация: если в системе нет ru_RU.UTF-8 (минимальный Docker, Windows MSVC
+// без installed-locale), бросать исключение из глобального конструктора DLL нельзя —
+// std::terminate в DllMain/_init обвалит процесс 1С ДО dlopen/LoadLibrary.
+static std::locale init_locale_ru()
+{
+	const char* names[] = {
+#ifdef _WINDOWS
+		"Russian_Russia.1251", "ru-RU", "ru_RU.UTF-8",
+#else
+		"ru_RU.UTF-8", "ru_RU.utf8", "ru_RU",
+#endif
+	};
+	for (const char* nm : names) {
+		try { return std::locale(nm); }
+		catch (...) {}
+	}
+	return std::locale::classic();
+}
 
+std::locale locale_ru = init_locale_ru();
+
+// Итератор std::u16string даёт char16_t; std::toupper/tolower принимает wchar_t.
+// На Linux/macOS wchar_t — 4 байта, на Windows — 2. Промежуточный wchar_t покрывает оба случая
+// для символов BMP (включая всю кириллицу). Результат явно усекаем обратно к char16_t.
 std::u16string upper(const std::u16string& src)
 {
 	std::u16string str = src;
-	std::transform(str.begin(), str.end(), str.begin(), [](wchar_t ch) { return std::toupper(ch, locale_ru); });
+	std::transform(str.begin(), str.end(), str.begin(), [](char16_t ch) {
+		return static_cast<char16_t>(std::toupper(static_cast<wchar_t>(ch), locale_ru));
+	});
 	return str;
 }
 
 std::u16string lower(const std::u16string& src)
 {
 	std::u16string str = src;
-	std::transform(str.begin(), str.end(), str.begin(), [](wchar_t ch) { return std::tolower(ch, locale_ru); });
+	std::transform(str.begin(), str.end(), str.begin(), [](char16_t ch) {
+		return static_cast<char16_t>(std::tolower(static_cast<wchar_t>(ch), locale_ru));
+	});
 	return str;
 }
 
@@ -804,32 +851,31 @@ WCHAR_T* AddInNative::W(const char16_t* str) const
 	return res;
 }
 
+// Возвращает указатель на закэшированное имя — без AllocMemory.
+// Используется для GetPropName/GetMethodName/RegisterExtensionAs: 1С НЕ освобождает
+// возвращаемые им const WCHAR_T*, поэтому каждый вызов AllocMemory был утечкой,
+// заметной в Конфигураторе при обходе свойств.
+const WCHAR_T* AddInNative::Wcached(const std::u16string& str) const
+{
+	std::lock_guard<std::mutex> lock(name_cache_mutex);
+	auto it = name_cache.find(str);
+	if (it == name_cache.end()) it = name_cache.emplace(str, str).first;
+	return reinterpret_cast<const WCHAR_T*>(it->second.c_str());
+}
+
 #ifdef _WINDOWS
 
 std::string cp1251_to_utf8(const char* str) {
-	std::string res;
-	int result_u, result_c;
-	result_u = MultiByteToWideChar(1251, 0, str, -1, 0, 0);
-	if (!result_u) { return 0; }
-	wchar_t* ures = new wchar_t[result_u];
-	if (!MultiByteToWideChar(1251, 0, str, -1, ures, result_u)) {
-		delete[] ures;
-		return 0;
-	}
-	result_c = WideCharToMultiByte(65001, 0, ures, -1, 0, 0, 0, 0);
-	if (!result_c) {
-		delete[] ures;
-		return 0;
-	}
-	char* cres = new char[result_c];
-	if (!WideCharToMultiByte(65001, 0, ures, -1, cres, result_c, 0, 0)) {
-		delete[] cres;
-		return 0;
-	}
-	delete[] ures;
-	res.append(cres);
-	delete[] cres;
-	return res;
+	if (!str) return {};
+	int result_u = MultiByteToWideChar(1251, 0, str, -1, 0, 0);
+	if (!result_u) return {};
+	std::vector<wchar_t> ures(result_u);
+	if (!MultiByteToWideChar(1251, 0, str, -1, ures.data(), result_u)) return {};
+	int result_c = WideCharToMultiByte(65001, 0, ures.data(), -1, 0, 0, 0, 0);
+	if (!result_c) return {};
+	std::vector<char> cres(result_c);
+	if (!WideCharToMultiByte(65001, 0, ures.data(), -1, cres.data(), result_c, 0, 0)) return {};
+	return std::string(cres.data());
 }
 
 #else

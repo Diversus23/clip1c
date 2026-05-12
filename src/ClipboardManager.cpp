@@ -279,6 +279,8 @@ bool BaseHelper::ClipboardManager::Empty()
 #else //_WINDOWS
 
 #include <vector>
+#include <cstdlib>
+#include <mutex>
 #include "clip.h"
 
 namespace clip {
@@ -288,8 +290,30 @@ namespace clip {
 	}
 }
 
+// На 1С-сервере под Linux DISPLAY обычно не задана. clip-1.3 в этом случае пытается xcb_connect
+// и роняет процесс на разыменовании невалидного дескриптора. Проверяем заранее и без X
+// возвращаем нейтральный результат вместо краша.
+static bool x_available()
+{
+	const char* d = std::getenv("DISPLAY");
+	return d && *d;
+}
+
+// clip-1.3 по умолчанию бросает std::runtime_error через границу ABI. Перехватываем у себя,
+// чтобы не зависеть от совместимости libstdc++ между clip и нашим .so.
+static void install_clip_error_handler_once()
+{
+	static std::once_flag flag;
+	std::call_once(flag, []() {
+		clip::set_error_handler([](clip::ErrorCode) {
+			// Молча игнорируем — clip-функции вернут false, наш код обработает корректно.
+		});
+	});
+}
+
 BaseHelper::ClipboardManager::ClipboardManager()
 {
+	install_clip_error_handler_once();
 }
 
 BaseHelper::ClipboardManager::~ClipboardManager()
@@ -298,21 +322,31 @@ BaseHelper::ClipboardManager::~ClipboardManager()
 
 bool BaseHelper::ClipboardManager::SetText(const std::wstring& text, bool bEmpty)
 {
+	if (!x_available()) return false;
 	return clip::set_text(WC2MB(text));
 }
 
 std::string BaseHelper::ClipboardManager::GetFormat()
 {
+	if (!x_available()) return "[]";
+	JSON json;
 	clip::lock l;
 	if (l.locked()) {
-		if (l.is_convertible(clip::text_format())) return "[{\"key\":1,\"name\":\"TEXT\"}]";
-		if (l.is_convertible(clip::image_format())) return "[{\"key\":2,\"name\":\"PNG\"}]";
+		if (l.is_convertible(clip::text_format())) {
+			JSON j; j["key"] = 1; j["name"] = "TEXT";
+			json.push_back(j);
+		}
+		if (l.is_convertible(clip::image_format())) {
+			JSON j; j["key"] = 2; j["name"] = "PNG";
+			json.push_back(j);
+		}
 	}
-	return {};
+	return json.dump();
 }
 
 std::wstring BaseHelper::ClipboardManager::GetText()
 {
+	if (!x_available()) return {};
 	std::string text;
 	clip::get_text(text);
 	return MB2WC(text);
@@ -320,11 +354,13 @@ std::wstring BaseHelper::ClipboardManager::GetText()
 
 bool BaseHelper::ClipboardManager::GetImage(VH& data)
 {
+	if (!x_available()) return false;
 	clip::image image;
-	clip::get_image(image);
+	if (!clip::get_image(image)) return false;
+	if (!image.is_valid()) return false;
 	std::vector<uint8_t> buffer;
-	clip::x11::write_png(image, buffer);
-	if (buffer.empty()) return true;
+	if (!clip::x11::write_png(image, buffer)) return false;
+	if (buffer.empty()) return false;
 	data.AllocMemory(buffer.size());
 	memcpy(data.data(), buffer.data(), buffer.size());
 	return true;
@@ -332,13 +368,17 @@ bool BaseHelper::ClipboardManager::GetImage(VH& data)
 
 bool BaseHelper::ClipboardManager::SetImage(VH& data, bool bEmpty)
 {
+	if (!x_available()) return false;
+	if (data.size() == 0) return false;
 	clip::image image;
-	clip::x11::read_png((uint8_t*)data.data(), data.size(), &image, nullptr);
+	if (!clip::x11::read_png((uint8_t*)data.data(), data.size(), &image, nullptr)) return false;
+	if (!image.is_valid()) return false;
 	return clip::set_image(image);
 }
 
 bool BaseHelper::ClipboardManager::Empty()
 {
+	if (!x_available()) return false;
 	clip::clear();
 	return true;
 }

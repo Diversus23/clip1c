@@ -46,11 +46,7 @@ ClipboardControl::~ClipboardControl()
 
 #ifdef _WINDOWS
 
-//////////////////////////////////////////////////////////////////////////////
-//                                                                          // 
-//  LINUX: https://github.com/cdown/clipnotify/blob/master/clipnotify.c     //
-//                                                                          // 
-//////////////////////////////////////////////////////////////////////////////
+#include <atomic>
 
 void ClipboardControl::SendEvent()
 {
@@ -76,29 +72,74 @@ static LRESULT CALLBACK ClipboardWndProc(HWND hWnd, UINT message, WPARAM wParam,
 
 bool ClipboardControl::GetMonitoring()
 {
-	return hClipboardMonitor;
+	return hClipboardMonitor.load() != nullptr;
+}
+
+void ClipboardControl::MonitorThreadProc(std::promise<bool> ready)
+{
+	// Регистрация класса один раз на DLL. Повторный RegisterClass с тем же hInstance
+	// вернёт 0 и SetLastError(ERROR_CLASS_ALREADY_EXISTS) — это нормально, окно создастся
+	// по уже зарегистрированному классу.
+	const LPCWSTR wsClassName = L"VanessaClipboardMonitor";
+	WNDCLASS wndClass = {};
+	wndClass.hInstance = hModule;
+	wndClass.lpszClassName = wsClassName;
+	wndClass.lpfnWndProc = ClipboardWndProc;
+	RegisterClass(&wndClass);
+
+	HWND hwnd = CreateWindowW(wsClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hModule, 0);
+	if (!hwnd) {
+		ready.set_value(false);
+		return;
+	}
+	SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)this);
+	if (!AddClipboardFormatListener(hwnd)) {
+		DestroyWindow(hwnd);
+		ready.set_value(false);
+		return;
+	}
+	hClipboardMonitor.store(hwnd);
+	monitorThreadId.store(GetCurrentThreadId());
+	// Сигналим успешный старт ДО входа в message pump — основной поток разблокируется.
+	ready.set_value(true);
+
+	// Стандартный message pump. Выход — по WM_QUIT (PostThreadMessage из SetMonitoring(false)).
+	MSG msg;
+	while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	RemoveClipboardFormatListener(hwnd);
+	SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+	DestroyWindow(hwnd);
+	hClipboardMonitor.store(nullptr);
+	monitorThreadId.store(0);
 }
 
 void ClipboardControl::SetMonitoring(bool value)
 {
-	if (hClipboardMonitor) {
-		SetWindowLongPtr(hClipboardMonitor, GWLP_USERDATA, 0);
-		RemoveClipboardFormatListener(hClipboardMonitor);
-		DestroyWindow(hClipboardMonitor);
-		hClipboardMonitor = nullptr;
-	}
+	bool running = (hClipboardMonitor.load() != nullptr);
+	if (value == running) return;
+
 	if (value) {
-		const LPCWSTR wsClassName = L"VanessaClipboardMonitor";
+		// Подчищаем joinable-состояние от предыдущей попытки старта, если та упала.
+		if (monitorThread.joinable()) monitorThread.join();
 
-		WNDCLASS wndClass = {};
-		wndClass.hInstance = hModule;
-		wndClass.lpszClassName = wsClassName;
-		wndClass.lpfnWndProc = ClipboardWndProc;
-		RegisterClass(&wndClass);
-
-		hClipboardMonitor = CreateWindow(wsClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hModule, 0);
-		SetWindowLongPtr(hClipboardMonitor, GWLP_USERDATA, (LONG_PTR)this);
-		AddClipboardFormatListener(hClipboardMonitor);
+		std::promise<bool> ready;
+		auto fut = ready.get_future();
+		monitorThread = std::thread(&ClipboardControl::MonitorThreadProc, this, std::move(ready));
+		bool ok = fut.get();
+		if (!ok) {
+			// Поток уже вышел из MonitorThreadProc — корректно join-им, чтобы не оставлять joinable-state,
+			// иначе следующий SetMonitoring(true) увидел бы fake-running и тихо завис.
+			if (monitorThread.joinable()) monitorThread.join();
+		}
+	}
+	else {
+		DWORD tid = monitorThreadId.load();
+		if (tid) PostThreadMessage(tid, WM_QUIT, 0, 0);
+		if (monitorThread.joinable()) monitorThread.join();
 	}
 }
 
