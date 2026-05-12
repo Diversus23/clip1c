@@ -94,17 +94,23 @@ long DestroyObject(IComponentBase** pInterface)
 } // extern "C"
 
 // std::wstring_convert хранит внутренние буферы ошибок и не потокобезопасен.
-// thread_local решает оба требования: каждый поток получает свой экземпляр,
-// и горячий путь маршалинга tVariant не платит за construct/destruct на каждый вызов.
+// thread_local на MSVC /MT + DisableThreadLibraryCalls в DllMain ведёт к тому, что CRT
+// не получает уведомления о потоках и не может корректно инициализировать non-trivial
+// thread_local — DLL не загружается в процесс 1С (типовое сообщение «не предназначена
+// для Толстый клиент»). Откатились на static + mutex: безопасно во всех режимах.
 std::string WC2MB(const std::wstring& wstr)
 {
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	static std::mutex m;
+	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	std::lock_guard<std::mutex> lock(m);
 	return converter.to_bytes(wstr);
 }
 
 std::wstring MB2WC(const std::string& str)
 {
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	static std::mutex m;
+	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+	std::lock_guard<std::mutex> lock(m);
 	return converter.from_bytes(str);
 }
 
@@ -496,11 +502,13 @@ void ADDIN_API AddInNative::FreeMemory(void** pMemory) const
 
 std::string WCHAR2MB(std::basic_string_view<WCHAR_T> src)
 {
+	static std::mutex m;
+	std::lock_guard<std::mutex> lock(m);
 #ifdef _WINDOWS
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
+	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
 	return cvt_utf8_utf16.to_bytes(src.data(), src.data() + src.size());
 #else
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
+	static std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
 	return cvt_utf8_utf16.to_bytes(reinterpret_cast<const char16_t*>(src.data()),
 		reinterpret_cast<const char16_t*>(src.data() + src.size()));
 #endif//_WINDOWS
@@ -510,19 +518,23 @@ std::wstring WCHAR2WC(std::basic_string_view<WCHAR_T> src) {
 #ifdef _WINDOWS
 	return std::wstring(src);
 #else
-	thread_local std::wstring_convert<std::codecvt_utf16<wchar_t, 0x10ffff, std::little_endian>> conv;
+	static std::mutex m;
+	std::lock_guard<std::mutex> lock(m);
+	static std::wstring_convert<std::codecvt_utf16<wchar_t, 0x10ffff, std::little_endian>> conv;
 	return conv.from_bytes(reinterpret_cast<const char*>(src.data()),
 		reinterpret_cast<const char*>(src.data() + src.size()));
 #endif//_WINDOWS
 }
 
 std::u16string MB2WCHAR(std::string_view src) {
+	static std::mutex m;
+	std::lock_guard<std::mutex> lock(m);
 #ifdef _WINDOWS
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
+	static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> cvt_utf8_utf16;
 	std::wstring tmp = cvt_utf8_utf16.from_bytes(src.data(), src.data() + src.size());
 	return std::u16string(reinterpret_cast<const char16_t*>(tmp.data()), tmp.size());
 #else
-	thread_local std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
+	static std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> cvt_utf8_utf16;
 	return cvt_utf8_utf16.from_bytes(src.data(), src.data() + src.size());
 #endif//_WINDOWS
 }
