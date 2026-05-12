@@ -63,7 +63,11 @@ AppCapabilities SetPlatformCapabilities(const AppCapabilities capabilities)
 
 AttachType GetAttachType()
 {
-	return eCanAttachNotIsolated;
+	// eCanAttachAny: компонента работает и изолированно, и в адресном пространстве 1С.
+	// Платформы 8.3.21+ для толстого клиента Windows x64 по умолчанию подключают
+	// Native-компоненты изолированно — с прежним eCanAttachNotIsolated 1С отказывалась
+	// загружать и писала "не предназначена для Толстый клиент (Windows x86-64)".
+	return eCanAttachAny;
 }
 
 const WCHAR_T* GetClassNames()
