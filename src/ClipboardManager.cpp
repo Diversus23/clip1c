@@ -88,14 +88,19 @@ std::wstring BaseHelper::ClipboardManager::GetText()
 	std::wstring result;
 	if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
 		if (HGLOBAL hGlobal = ::GetClipboardData(CF_UNICODETEXT)) {
-			result = static_cast<LPWSTR>(GlobalLock(hGlobal));
-			GlobalUnlock(hGlobal);
+			// GlobalLock может вернуть NULL — std::wstring(nullptr) это UB.
+			if (LPWSTR p = static_cast<LPWSTR>(GlobalLock(hGlobal))) {
+				result = p;
+				GlobalUnlock(hGlobal);
+			}
 		}
 	}
 	else if (IsClipboardFormatAvailable(CF_TEXT)) {
 		if (HGLOBAL hGlobal = ::GetClipboardData(CF_TEXT)) {
-			result = MB2WC(static_cast<LPSTR>(GlobalLock(hGlobal)));
-			GlobalUnlock(hGlobal);
+			if (LPSTR p = static_cast<LPSTR>(GlobalLock(hGlobal))) {
+				result = MB2WC(p);
+				GlobalUnlock(hGlobal);
+			}
 		}
 	}
 	else if (IsClipboardFormatAvailable(CF_HDROP)) {
@@ -121,14 +126,18 @@ bool BaseHelper::ClipboardManager::SetText(const std::wstring& text, bool bEmpty
 	if (!m_isOpened) return false;
 	if (bEmpty) EmptyClipboard();
 	size_t size = (text.size() + 1) * sizeof(wchar_t);
-	if (HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, size)) {
-		memcpy(GlobalLock(hGlobal), text.c_str(), size);
-		GlobalUnlock(hGlobal);
-		SetClipboardData(CF_UNICODETEXT, hGlobal);
+	HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, size);
+	if (!hGlobal) return false;
+	void* dst = GlobalLock(hGlobal);
+	if (!dst) { GlobalFree(hGlobal); return false; }
+	memcpy(dst, text.c_str(), size);
+	GlobalUnlock(hGlobal);
+	// После успешного SetClipboardData владельцем буфера становится система — GlobalFree нельзя.
+	if (!SetClipboardData(CF_UNICODETEXT, hGlobal)) {
 		GlobalFree(hGlobal);
-		return true;
+		return false;
 	}
-	else return false;
+	return true;
 }
 
 #include <shlobj.h> // DROPFILES
@@ -137,28 +146,34 @@ bool BaseHelper::ClipboardManager::SetFiles(const std::string& text, bool bEmpty
 {
 	if (!m_isOpened) return false;
 	if (bEmpty) EmptyClipboard();
-	nlohmann::json json = nlohmann::json::parse(text);
-	if (json.is_array()) {
-		SIZE_T clpSize = sizeof(DROPFILES);
-		for (auto element : json) {
-			std::wstring filename = MB2WC(element);
-			clpSize += (filename.size() + 1) * sizeof(TCHAR);
-		}
-		HDROP hDrop = (HDROP)GlobalAlloc(GHND, clpSize);
-		DROPFILES* df = (DROPFILES*)GlobalLock(hDrop);
-		df->pFiles = sizeof(DROPFILES); // string offset
-		df->fWide = TRUE; // unicode file names
+	nlohmann::json json;
+	try { json = nlohmann::json::parse(text); }
+	catch (...) { return false; }
+	if (!json.is_array()) return false;
 
-		// copy the command line args to the allocated memory
-		TCHAR* dstStart = (TCHAR*)&df[1];
-		for (auto element : json) {
-			std::wstring filename = MB2WC(element);
-			size_t len = filename.size() + 1;
-			wmemcpy(dstStart, filename.c_str(), len);
-			dstStart = &dstStart[len]; // + 1 => get beyond '\0'
-		}
-		GlobalUnlock(hDrop);
-		SetClipboardData(CF_HDROP, hDrop);
+	SIZE_T clpSize = sizeof(DROPFILES) + sizeof(TCHAR); // двойной \0 в конце списка
+	for (auto element : json) {
+		std::wstring filename = MB2WC(element);
+		clpSize += (filename.size() + 1) * sizeof(TCHAR);
+	}
+	HDROP hDrop = (HDROP)GlobalAlloc(GHND, clpSize);
+	if (!hDrop) return false;
+	DROPFILES* df = (DROPFILES*)GlobalLock(hDrop);
+	if (!df) { GlobalFree(hDrop); return false; }
+	df->pFiles = sizeof(DROPFILES); // string offset
+	df->fWide = TRUE; // unicode file names
+
+	TCHAR* dstStart = (TCHAR*)&df[1];
+	for (auto element : json) {
+		std::wstring filename = MB2WC(element);
+		size_t len = filename.size() + 1;
+		wmemcpy(dstStart, filename.c_str(), len);
+		dstStart = &dstStart[len];
+	}
+	GlobalUnlock(hDrop);
+	if (!SetClipboardData(CF_HDROP, hDrop)) {
+		GlobalFree(hDrop);
+		return false;
 	}
 	return true;
 }
@@ -169,25 +184,26 @@ bool BaseHelper::ClipboardManager::GetImage(VH& variant)
 
 	static UINT CF_PNG = RegisterClipboardFormat(L"PNG");
 	if (IsClipboardFormatAvailable(CF_PNG)) {
-		HANDLE hData = ::GetClipboardData(CF_PNG);
-		if (hData) {
-			void* data = ::GlobalLock(hData);
-			auto size = ::GlobalSize(hData);
-			variant.AllocMemory((unsigned long)size);
-			memcpy(variant.data(), data, size);
-			::GlobalUnlock(hData);
-			return true;
+		if (HANDLE hData = ::GetClipboardData(CF_PNG)) {
+			if (void* data = ::GlobalLock(hData)) {
+				auto size = ::GlobalSize(hData);
+				variant.AllocMemory((unsigned long)size);
+				memcpy(variant.data(), data, size);
+				::GlobalUnlock(hData);
+				return true;
+			}
 		}
 	}
 
+	if (!IsClipboardFormatAvailable(CF_DIBV5)) return true;
 	HANDLE hData = ::GetClipboardData(CF_DIBV5);
-	if (hData) {
-		uint8_t* data = reinterpret_cast<uint8_t*>(::GlobalLock(hData));
-		// CF_DIBV5 is composed of a BITMAPV5HEADER + bitmap data
-		ImageHelper image(reinterpret_cast<BITMAPINFO*>(data), data + sizeof(BITMAPV5HEADER));
-		if (image) image.Save(variant);
-		::GlobalUnlock(hData);
-	}
+	if (!hData) return true;
+	uint8_t* data = reinterpret_cast<uint8_t*>(::GlobalLock(hData));
+	if (!data) return true;
+	// CF_DIBV5 is composed of a BITMAPV5HEADER + bitmap data
+	ImageHelper image(reinterpret_cast<BITMAPINFO*>(data), data + sizeof(BITMAPV5HEADER));
+	if (image) image.Save(variant);
+	::GlobalUnlock(hData);
 	return true;
 }
 
@@ -201,41 +217,49 @@ bool BaseHelper::ClipboardManager::SetImage(VH& variant, bool bEmpty)
 	if (bEmpty) EmptyClipboard();
 
 	std::vector<BYTE> vec;
-	if (image.Save(vec)) {
-		static UINT CF_PNG = RegisterClipboardFormat(L"PNG");
-		if (auto hGlobal = GlobalAlloc(GMEM_MOVEABLE, vec.size())) {
-			auto buffer = (BYTE*)GlobalLock(hGlobal);
-			memcpy(buffer, vec.data(), vec.size());
-			SetClipboardData(CF_PNG, hGlobal);
-			GlobalUnlock(hGlobal);
-			GlobalFree(hGlobal);
-		}
-		else return false;
+	if (!image.Save(vec)) return false;
+
+	static UINT CF_PNG = RegisterClipboardFormat(L"PNG");
+	HGLOBAL hGlobalPng = GlobalAlloc(GMEM_MOVEABLE, vec.size());
+	if (!hGlobalPng) return false;
+	{
+		BYTE* buffer = (BYTE*)GlobalLock(hGlobalPng);
+		if (!buffer) { GlobalFree(hGlobalPng); return false; }
+		memcpy(buffer, vec.data(), vec.size());
+		GlobalUnlock(hGlobalPng);
 	}
-	else return false;
+	if (!SetClipboardData(CF_PNG, hGlobalPng)) {
+		GlobalFree(hGlobalPng);
+		return false;
+	}
+	// hGlobalPng теперь принадлежит системе — НЕ освобождаем.
 
 	HBITMAP hBitmap(image);
-	if (hBitmap) {
-		BITMAP bm;
-		GetObject(hBitmap, sizeof bm, &bm);
-		BITMAPINFOHEADER bi = { sizeof bi, bm.bmWidth, bm.bmHeight, 1, bm.bmBitsPixel, BI_RGB };
-		std::vector<BYTE> vec(bm.bmWidthBytes * bm.bmHeight);
-		auto hDC = GetDC(NULL);
-		GetDIBits(hDC, hBitmap, 0, bi.biHeight, vec.data(), (BITMAPINFO*)&bi, 0);
-		ReleaseDC(NULL, hDC);
-		DeleteObject(hBitmap);
+	if (!hBitmap) return true; // PNG записан, без DIB тоже ОК.
 
-		if (auto hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof bi + vec.size())) {
-			auto buffer = (BYTE*)GlobalLock(hGlobal);
-			memcpy(buffer, &bi, sizeof bi);
-			memcpy(buffer + sizeof bi, vec.data(), vec.size());
-			SetClipboardData(CF_DIB, hGlobal);
-			GlobalUnlock(hGlobal);
-			GlobalFree(hGlobal);
-			return true;
-		}
+	BITMAP bm;
+	GetObject(hBitmap, sizeof bm, &bm);
+	// GetDIBits с BI_RGB выравнивает строки по 4 байта. bm.bmWidthBytes — это stride исходной
+	// GDI-битмапы, который может отличаться от DIB-stride и привести к heap overflow.
+	const LONG dibStride = ((bm.bmWidth * bm.bmBitsPixel + 31) / 32) * 4;
+	BITMAPINFOHEADER bi = { sizeof bi, bm.bmWidth, bm.bmHeight, 1, bm.bmBitsPixel, BI_RGB };
+	std::vector<BYTE> dib((size_t)dibStride * bm.bmHeight);
+	HDC hDC = GetDC(NULL);
+	GetDIBits(hDC, hBitmap, 0, bi.biHeight, dib.data(), (BITMAPINFO*)&bi, 0);
+	ReleaseDC(NULL, hDC);
+	DeleteObject(hBitmap);
+
+	HGLOBAL hGlobalDib = GlobalAlloc(GMEM_MOVEABLE, sizeof bi + dib.size());
+	if (!hGlobalDib) return true; // PNG уже на месте.
+	BYTE* buffer = (BYTE*)GlobalLock(hGlobalDib);
+	if (!buffer) { GlobalFree(hGlobalDib); return true; }
+	memcpy(buffer, &bi, sizeof bi);
+	memcpy(buffer + sizeof bi, dib.data(), dib.size());
+	GlobalUnlock(hGlobalDib);
+	if (!SetClipboardData(CF_DIB, hGlobalDib)) {
+		GlobalFree(hGlobalDib);
 	}
-	return false;
+	return true;
 }
 
 bool BaseHelper::ClipboardManager::Empty()
@@ -250,6 +274,8 @@ bool BaseHelper::ClipboardManager::Empty()
 #else //_WINDOWS
 
 #include <vector>
+#include <cstdlib>
+#include <mutex>
 #include "clip.h"
 
 namespace clip {
@@ -259,8 +285,30 @@ namespace clip {
 	}
 }
 
+// На 1С-сервере под Linux DISPLAY обычно не задана. clip-1.3 в этом случае пытается xcb_connect
+// и роняет процесс на разыменовании невалидного дескриптора. Проверяем заранее и без X
+// возвращаем нейтральный результат вместо краша.
+static bool x_available()
+{
+	const char* d = std::getenv("DISPLAY");
+	return d && *d;
+}
+
+// clip-1.3 по умолчанию бросает std::runtime_error через границу ABI. Перехватываем у себя,
+// чтобы не зависеть от совместимости libstdc++ между clip и нашим .so.
+static void install_clip_error_handler_once()
+{
+	static std::once_flag flag;
+	std::call_once(flag, []() {
+		clip::set_error_handler([](clip::ErrorCode) {
+			// Молча игнорируем — clip-функции вернут false, наш код обработает корректно.
+		});
+	});
+}
+
 BaseHelper::ClipboardManager::ClipboardManager()
 {
+	install_clip_error_handler_once();
 }
 
 BaseHelper::ClipboardManager::~ClipboardManager()
@@ -269,21 +317,31 @@ BaseHelper::ClipboardManager::~ClipboardManager()
 
 bool BaseHelper::ClipboardManager::SetText(const std::wstring& text, bool bEmpty)
 {
+	if (!x_available()) return false;
 	return clip::set_text(WC2MB(text));
 }
 
 std::string BaseHelper::ClipboardManager::GetFormat()
 {
+	if (!x_available()) return "[]";
+	JSON json;
 	clip::lock l;
 	if (l.locked()) {
-		if (l.is_convertible(clip::text_format())) return "[{\"key\":1,\"name\":\"TEXT\"}]";
-		if (l.is_convertible(clip::image_format())) return "[{\"key\":2,\"name\":\"PNG\"}]";
+		if (l.is_convertible(clip::text_format())) {
+			JSON j; j["key"] = 1; j["name"] = "TEXT";
+			json.push_back(j);
+		}
+		if (l.is_convertible(clip::image_format())) {
+			JSON j; j["key"] = 2; j["name"] = "PNG";
+			json.push_back(j);
+		}
 	}
-	return {};
+	return json.dump();
 }
 
 std::wstring BaseHelper::ClipboardManager::GetText()
 {
+	if (!x_available()) return {};
 	std::string text;
 	clip::get_text(text);
 	return MB2WC(text);
@@ -291,11 +349,13 @@ std::wstring BaseHelper::ClipboardManager::GetText()
 
 bool BaseHelper::ClipboardManager::GetImage(VH& data)
 {
+	if (!x_available()) return false;
 	clip::image image;
-	clip::get_image(image);
+	if (!clip::get_image(image)) return false;
+	if (!image.is_valid()) return false;
 	std::vector<uint8_t> buffer;
-	clip::x11::write_png(image, buffer);
-	if (buffer.empty()) return true;
+	if (!clip::x11::write_png(image, buffer)) return false;
+	if (buffer.empty()) return false;
 	data.AllocMemory(buffer.size());
 	memcpy(data.data(), buffer.data(), buffer.size());
 	return true;
@@ -303,13 +363,17 @@ bool BaseHelper::ClipboardManager::GetImage(VH& data)
 
 bool BaseHelper::ClipboardManager::SetImage(VH& data, bool bEmpty)
 {
+	if (!x_available()) return false;
+	if (data.size() == 0) return false;
 	clip::image image;
-	clip::x11::read_png((uint8_t*)data.data(), data.size(), &image, nullptr);
+	if (!clip::x11::read_png((uint8_t*)data.data(), data.size(), &image, nullptr)) return false;
+	if (!image.is_valid()) return false;
 	return clip::set_image(image);
 }
 
 bool BaseHelper::ClipboardManager::Empty()
 {
+	if (!x_available()) return false;
 	clip::clear();
 	return true;
 }

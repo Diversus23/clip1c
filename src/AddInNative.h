@@ -9,6 +9,7 @@
 #include <vector>
 #include <variant>
 #include <functional>
+#include <mutex>
 
 #include "ComponentBase.h"
 #include "AddInDefBase.h"
@@ -115,6 +116,7 @@ protected:
 
 public:
 	WCHAR_T* W(const char16_t* str) const;
+	const WCHAR_T* Wcached(const std::u16string& str) const;
 	static std::string version();
 
 private:
@@ -148,6 +150,12 @@ private:
 	std::vector<Meth> methods;
 	std::u16string name;
 	bool alias = false;
+	// Кэш имён для GetPropName/GetMethodName/RegisterExtensionAs. 1С Native API не вызывает
+	// FreeMemory для возвращаемых const WCHAR_T* — поэтому каждый AllocMemory был утечкой.
+	// Храним один раз скопированную строку, возвращаем .c_str() (валиден до Done()).
+	// Защищаем мьютексом: introspection может прилетать из разных потоков (debug-инспектор + основной).
+	mutable std::mutex name_cache_mutex;
+	mutable std::map<std::u16string, std::u16string> name_cache;
 
 public:
 	bool ExternalEvent(const std::u16string& message, const std::u16string& data);
