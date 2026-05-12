@@ -23,7 +23,11 @@ static IStream* CreateMemoryStream(const BYTE* pInit, UINT cbInit)
 {
 	static SHCreateMemStreamType SHCreateMemStreamFunc = nullptr;
 	if (!SHCreateMemStreamFunc) {
-		if (auto lib = LoadLibrary(L"shlwapi.dll")) {
+		// shlwapi.dll уже загружена в адресном пространстве процесса 1С — берём существующий
+		// модуль вместо LoadLibrary (тот увеличивал refcount без FreeLibrary).
+		HMODULE lib = GetModuleHandleW(L"shlwapi.dll");
+		if (!lib) lib = LoadLibraryW(L"shlwapi.dll");
+		if (lib) {
 			SHCreateMemStreamFunc = reinterpret_cast<SHCreateMemStreamType>(GetProcAddress(lib, "SHCreateMemStream"));
 		}
 	}
