@@ -426,13 +426,11 @@ void AddInNative::SetLocale(const WCHAR_T* locale)
 }
 
 std::u16string AddInNative::getComponentNames() {
-	const char16_t* const delim = u"|";
-	std::vector<std::u16string> names;
-	for (auto it = components.begin(); it != components.end(); ++it) names.push_back(it->first);
-	std::basic_ostringstream<char16_t, std::char_traits<char16_t>, std::allocator<char16_t>> imploded;
-	std::copy(names.begin(), names.end(), std::ostream_iterator<std::u16string, char16_t, std::char_traits<char16_t>>(imploded, delim));
-	std::u16string result = imploded.str();
-	result.pop_back();
+	std::u16string result;
+	for (auto it = components.begin(); it != components.end(); ++it) {
+		if (!result.empty()) result += u'|';
+		result += it->first;
+	}
 	return result;
 }
 
@@ -675,24 +673,26 @@ static std::u16string typeinfo(TYPEVAR vt, bool alias)
 
 std::exception AddInNative::VarinantHelper::error(TYPEVAR vt) const
 {
-	std::basic_stringstream<char16_t, std::char_traits<char16_t>, std::allocator<char16_t>> ss;
+	// libc++ на macOS не предоставляет facet'ов ctype<char16_t>/numpunct<char16_t>,
+	// поэтому std::basic_stringstream<char16_t> здесь не годится — собираем строку конкатенацией.
+	std::u16string msg;
 	if (addin && addin->alias) {
-		ss << u"Ошибка получения значения";
-		if (prop) ss << u" при обращении к свойству <" << prop->names[1] << ">";
-		if (meth) ss << u" при вызове метода <" << meth->names[1] << ">";
-		if (number >= 0) ss << u" параметр <" << number + 1 << ">";
-		ss << u" ожидается <" + typeinfo(vt, true) << u">";
-		if (pvar) ss << u" фактически <" + typeinfo(pvar->vt, true) << u">";
+		msg = u"Ошибка получения значения";
+		if (prop) msg += u" при обращении к свойству <" + prop->names[1] + u">";
+		if (meth) msg += u" при вызове метода <" + meth->names[1] + u">";
+		if (number >= 0) msg += u" параметр <" + MB2WCHAR(std::to_string(number + 1)) + u">";
+		msg += u" ожидается <" + typeinfo(vt, true) + u">";
+		if (pvar) msg += u" фактически <" + typeinfo(pvar->vt, true) + u">";
 	}
 	else {
-		ss << u"Error getting value";
-		if (prop) ss << u" of property <" << prop->names[0] << ">";
-		if (meth) ss << u" when calling method <" << meth->names[0] << ">";
-		if (number >= 0) ss << u" parameter <" << number + 1 << ">";
-		ss << u" expected <" + typeinfo(vt, false) << u">";
-		if (pvar) ss << u" actual value <" + typeinfo(pvar->vt, false) << u">";
+		msg = u"Error getting value";
+		if (prop) msg += u" of property <" + prop->names[0] + u">";
+		if (meth) msg += u" when calling method <" + meth->names[0] + u">";
+		if (number >= 0) msg += u" parameter <" + MB2WCHAR(std::to_string(number + 1)) + u">";
+		msg += u" expected <" + typeinfo(vt, false) + u">";
+		if (pvar) msg += u" actual value <" + typeinfo(pvar->vt, false) + u">";
 	}
-	if (addin) addin->AddError(ss.str());
+	if (addin) addin->AddError(msg);
 	return std::bad_typeid();
 }
 

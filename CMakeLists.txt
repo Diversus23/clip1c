@@ -118,7 +118,6 @@ if(UNIX AND NOT APPLE)
 		add_custom_command(TARGET ${PROJECT_NAME}
 			POST_BUILD COMMAND ${STRIP_CMD}
 			COMMENT "Strip ${PROJECT_NAME}"
-			MAIN_DEPENDENCY ${PROJECT_NAME}
 		)
 	else()
 		message(WARNING "eu-strip не найден — отладочные символы не будут отделены")
