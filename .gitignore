@@ -17,3 +17,5 @@
 *.dylib
 *.dll
 *.pdb
+AddIn.zip
+.claude/settings.json
