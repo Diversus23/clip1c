@@ -31,12 +31,17 @@ class Component(NamedTuple):
 
 
 def default_components(name: str) -> List[Component]:
+    # macOS объявляется двумя отдельными записями (x86_64 и ARM64), как в
+    # эталонном примере 1С (conf_data_in/MANIFEST.XML.in). Клиент 8.3.21+ на
+    # Apple Silicon — нативный arm64 и ищет arch="ARM64"; единой записи
+    # arch="Universal" ему недостаточно.
     return [
-        Component("Windows", "i386",      f"{name}Win32.dll",   f"{name}Win32.dll"),
-        Component("Windows", "x86_64",    f"{name}Win64.dll",   f"{name}Win64.dll"),
-        Component("Linux",   "i386",      f"{name}Lin32.so",    f"{name}Lin32.so"),
-        Component("Linux",   "x86_64",    f"{name}Lin64.so",    f"{name}Lin64.so"),
-        Component("MacOS",   "Universal", f"{name}Mac64.dylib", f"{name}Mac.dylib"),
+        Component("Windows", "i386",   f"{name}Win32.dll",     f"{name}Win32.dll"),
+        Component("Windows", "x86_64", f"{name}Win64.dll",     f"{name}Win64.dll"),
+        Component("Linux",   "i386",   f"{name}Lin32.so",      f"{name}Lin32.so"),
+        Component("Linux",   "x86_64", f"{name}Lin64.so",      f"{name}Lin64.so"),
+        Component("MacOS",   "x86_64", f"{name}Mac64.dylib",   f"{name}Mac64.dylib"),
+        Component("MacOS",   "ARM64",  f"{name}MacARM64.dylib", f"{name}MacARM64.dylib"),
     ]
 
 

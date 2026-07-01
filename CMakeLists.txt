@@ -55,13 +55,29 @@ else()
 	set(MySuffixBits "64")
 endif()
 
+# Суффикс в имени файла. По умолчанию совпадает с битностью (32/64).
+# На macOS для arm64 используем суффикс "ARM64" (Clip1CMacARM64.dylib), чтобы
+# имя совпадало с записью arch="ARM64" в MANIFEST.XML (см. tools/make_bundle.py).
+# Каталог вывода при этом остаётся bin64 (arm64 — 64-битная архитектура).
+set(MyNameSuffix "${MySuffixBits}")
+if(APPLE)
+	if(CMAKE_OSX_ARCHITECTURES)
+		set(_mac_arch "${CMAKE_OSX_ARCHITECTURES}")
+	else()
+		set(_mac_arch "${CMAKE_SYSTEM_PROCESSOR}")
+	endif()
+	if(_mac_arch STREQUAL "arm64")
+		set(MyNameSuffix "ARM64")
+	endif()
+endif()
+
 set(LIBRARY_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/bin${MySuffixBits})
 set(EXECUTABLE_OUTPUT_PATH ${LIBRARY_OUTPUT_PATH})
 set(CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_PATH})
 
 set_target_properties(${TARGET} PROPERTIES
 	PREFIX ""
-	OUTPUT_NAME "${PROJECT_NAME}${MySuffixOS}${MySuffixBits}"
+	OUTPUT_NAME "${PROJECT_NAME}${MySuffixOS}${MyNameSuffix}"
 )
 
 if(WIN32)
@@ -137,5 +153,16 @@ if(APPLE)
 		PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 	set_target_properties(${TARGET} PROPERTIES
 		SUFFIX ".dylib"
+	)
+
+	# Ad-hoc подпись обязательна на Apple Silicon: неподписанный arm64-слайс
+	# не грузится через dlopen ("code signature invalid"), из-за чего 1С не
+	# может создать объект компоненты. Для компоненты, распаковываемой из
+	# макета, ad-hoc-подписи достаточно (Gatekeeper/quarantine не применяется).
+	# Для публичной раздачи можно заменить на Developer ID + нотаризацию.
+	add_custom_command(TARGET ${TARGET} POST_BUILD
+		COMMAND codesign --force --sign - $<TARGET_FILE:${TARGET}>
+		COMMENT "Ad-hoc codesign ${TARGET}"
+		VERBATIM
 	)
 endif()
