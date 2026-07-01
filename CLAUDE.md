@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Что это
 
-Native API внешняя компонента 1С для работы с буфером обмена. Один экспортируемый объект — `ClipboardControl`. Собирается под Windows (x86/x64), Linux (x86/x64) и macOS (universal x86_64+arm64). Выпускается как `AddIn.zip` с `MANIFEST.XML` по схеме `http://v8.1c.ru/8.2/addin/bundle`.
+Native API внешняя компонента 1С для работы с буфером обмена. Один экспортируемый объект — `ClipboardControl`. Собирается под Windows (x86/x64), Linux (x86/x64) и macOS (x86_64 и arm64 — отдельными бинарниками). Выпускается как `AddIn.zip` с `MANIFEST.XML` по схеме `http://v8.1c.ru/8.2/addin/bundle`.
 
 Это форк подсистемы буфера обмена из [VanessaExt](https://github.com/lintest/VanessaExt) с добавленной поддержкой macOS. Тестов в репозитории нет — единственная проверка корректности это успешная компиляция под все целевые платформы.
 
@@ -15,10 +15,13 @@ Native API внешняя компонента 1С для работы с буф
 | Windows (Win32+x64) | `Compile.bat` (требует MSVC; CMake падает на не-MSVC) | `bin32\Release\Clip1CWin32.dll`, `bin64\Release\Clip1CWin64.dll` |
 | Linux (x86_64) | `./build.sh 64` | `bin64/Clip1CLin64.so` |
 | Linux (i386) | `./build.sh 32` (нужны i386-multilib пакеты) | `bin32/Clip1CLin32.so` |
-| macOS (universal) | `cmake -B build64L -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 && cmake --build build64L` | `bin64/Clip1CMac64.dylib` |
+| macOS (x86_64) | `cmake -B build64Intel -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 && cmake --build build64Intel` | `bin64/Clip1CMac64.dylib` |
+| macOS (arm64) | `cmake -B build64Arm -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 && cmake --build build64Arm` | `bin64/Clip1CMacARM64.dylib` |
 | Очистка | `./build.sh 0` (Linux/macOS) | удаляет `build*L/` |
 
-Имя выходного файла обязательно следует шаблону `Clip1C{Win\|Lin\|Mac}{32\|64}.{dll\|so\|dylib}` — на это завязан `tools/make_bundle.py` и `MANIFEST.XML`. Если меняешь `OUTPUT_NAME` в CMake — синхронизируй с `default_components()` в `make_bundle.py`.
+Имя выходного файла следует шаблону `Clip1C{Win\|Lin\|Mac}{32\|64}.{dll\|so\|dylib}`, а для macOS arm64 — `Clip1CMacARM64.dylib` (суффикс `ARM64` вместо битности; каталог вывода при этом остаётся `bin64`). На имена завязаны `tools/make_bundle.py` и `MANIFEST.XML` (macOS объявляется двумя записями — `arch="x86_64"` и `arch="ARM64"`, как в эталоне 1С). Если меняешь `OUTPUT_NAME` в CMake — синхронизируй с `default_components()` в `make_bundle.py`.
+
+На macOS бинарник обязательно подписывается (в CMake POST_BUILD — ad-hoc `codesign --sign -`): без подписи arm64-слайс не грузится через `dlopen` на Apple Silicon, и 1С не может создать объект компоненты.
 
 Локальная сборка AddIn.zip (после того как собраны нужные платформы):
 ```bash
@@ -32,7 +35,7 @@ python3 tools/make_bundle.py --artifacts-dir . --output AddIn.zip
 CI собирает релиз автоматически по push'у тега `vX.Y.Z`:
 1. Обновить `VERSION_FULL` и компоненты `VERSION_MAJOR/MINOR/REVISION/BUILD` в `version.h`.
 2. Закоммитить, поставить аннотированный тег `git tag -a vX.Y.Z -m "..."`, запушить.
-3. Workflow `.github/workflows/build.yml` соберёт все 5 бинарников, упакует в `AddIn.zip`, создаст GitHub Release с авто-генерируемыми release notes.
+3. Workflow `.github/workflows/build.yml` соберёт все 6 бинарников (Win32/Win64/Lin32/Lin64/Mac64/MacARM64), упакует в `AddIn.zip`, создаст GitHub Release с авто-генерируемыми release notes.
 
 Теги вида `v1.0.1-rc1`, `-beta`, `-alpha` помечаются как pre-release.
 

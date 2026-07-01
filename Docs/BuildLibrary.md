@@ -6,7 +6,7 @@
 > **Тип в GitHub Actions:** при пуше в ветку или создании релиза CI
 > ([.github/workflows/build.yml](../.github/workflows/build.yml))
 > автоматически собирает бинарники под все платформы (Windows x86/x64,
-> Linux x86/x64, macOS Universal) и упаковывает их в `AddIn.zip` вместе с
+> Linux x86/x64, macOS x86_64 и arm64) и упаковывает их в `AddIn.zip` вместе с
 > `MANIFEST.XML`. На релиз ZIP добавляется в Assets автоматически.
 
 Ниже описаны шаги для **локальной** сборки.
@@ -51,20 +51,29 @@ sudo apt install -y gcc-multilib g++-multilib \
 
 Требуется Xcode Command Line Tools (`xcode-select --install`) и CMake.
 
+Компонента поставляется двумя отдельными бинарниками — под Intel (x86_64) и
+Apple Silicon (arm64), как в эталонном примере 1С. Клиент 8.3.21+ на Apple
+Silicon — нативный arm64 и ищет в `MANIFEST.XML` запись `arch="ARM64"`; одной
+универсальной записи ему недостаточно. Архитектура задаётся через
+`CMAKE_OSX_ARCHITECTURES`, а суффикс имени файла подставляется автоматически
+(`Clip1CMac64.dylib` для x86_64, `Clip1CMacARM64.dylib` для arm64):
+
 ```bash
-./build.sh
+# x86_64
+cmake -B build64Intel -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build64Intel
+
+# arm64
+cmake -B build64Arm -DCMAKE_OSX_ARCHITECTURES=arm64 \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build64Arm
 ```
 
-По умолчанию собирается только 64-битная версия (`bin64/Clip1CMac64.dylib`).
-Архитектура определяется компилятором: на Apple Silicon будет arm64, на Intel
-— x86_64. Для универсальной сборки задайте `CMAKE_OSX_ARCHITECTURES`:
-
-```bash
-mkdir -p build64L && cd build64L
-cmake -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
-cmake --build .
-```
+Оба бинарника автоматически подписываются ad-hoc-подписью (`codesign --sign -`
+в CMake POST_BUILD). **Это обязательно:** без подписи arm64-слайс не грузится
+через `dlopen` на Apple Silicon, и 1С не может создать объект компоненты. Для
+публичной раздачи ad-hoc-подпись можно заменить на Developer ID + нотаризацию.
 
 ### Отладочная сборка
 
@@ -97,7 +106,7 @@ git push origin v1.0.1
 
 Что произойдёт после push'а тега:
 1. Workflow `Build` запустится автоматически (триггер `tags: ['v*']`).
-2. Соберутся все 5 бинарников (Win32/Win64/Lin32/Lin64/MacOS Universal).
+2. Соберутся все 6 бинарников (Win32/Win64/Lin32/Lin64/Mac64/MacARM64).
 3. Job `package` соберёт `AddIn.zip` с `MANIFEST.XML`.
 4. Будет создан GitHub Release с тем же именем тега, в `Release notes`
    автоматически попадут commit-сообщения с предыдущего тега,

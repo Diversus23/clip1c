@@ -96,26 +96,42 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS (universal x86_64 + arm64)
+    name: macOS (x86_64 + arm64)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Configure (universal)
+      # Отдельные сборки под каждую архитектуру (как в эталоне 1С): клиент
+      # 8.3.21+ на Apple Silicon ищет в MANIFEST.XML запись arch="ARM64".
+      # Обе сборки кладут dylib в bin64/ с разными именами
+      # (Clip1CMac64.dylib / Clip1CMacARM64.dylib) и ad-hoc подписываются
+      # в CMake POST_BUILD.
+      - name: Build x86_64
         run: |
-          cmake -S . -B build64L \
+          cmake -S . -B build64Intel \
               -DCMAKE_BUILD_TYPE=RelWithDebInfo \
               -DTARGET_PLATFORM_32:BOOL=OFF \
-              -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+              -DCMAKE_OSX_ARCHITECTURES=x86_64 \
               -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build build64Intel -- -j$(sysctl -n hw.ncpu)
 
-      - name: Build
-        run: cmake --build build64L -- -j$(sysctl -n hw.ncpu)
-
-      - name: Verify universal binary
+      - name: Build arm64
         run: |
-          file bin64/Clip1CMac64.dylib
-          lipo -info bin64/Clip1CMac64.dylib
+          cmake -S . -B build64Arm \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DTARGET_PLATFORM_32:BOOL=OFF \
+              -DCMAKE_OSX_ARCHITECTURES=arm64 \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build build64Arm -- -j$(sysctl -n hw.ncpu)
+
+      - name: Verify binaries (arch + signature)
+        run: |
+          for f in bin64/Clip1CMac64.dylib bin64/Clip1CMacARM64.dylib; do
+            echo "== $f =="
+            file "$f"
+            lipo -info "$f"
+            codesign -dv "$f" 2>&1 | head -3
+          done
 
       - name: Upload binaries
         uses: actions/upload-artifact@v7
